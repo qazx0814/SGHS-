@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SGHS Adaptive English Learning</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+        import { getDatabase, ref, set, get, runTransaction, child }
+            from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+        const firebaseConfig = {
+            apiKey: "AIzaSyCnkSaUvAC5Qw5ozqhaOO1LpfizhtClv3A",
+            authDomain: "sghs-46ae3.firebaseapp.com",
+            databaseURL: "https://sghs-46ae3-default-rtdb.firebaseio.com",
+            projectId: "sghs-46ae3",
+            storageBucket: "sghs-46ae3.firebasestorage.app",
+            messagingSenderId: "422786421525",
+            appId: "1:422786421525:web:6dee75d8b79df536d04f1c"
+        };
+        const app = initializeApp(firebaseConfig);
+        const db  = getDatabase(app);
+        const WEIGHTS_REF = ref(db, 'shared_weights');
+        const USERS_REF   = ref(db, 'users');
+
+        async function initWeightsIfNeeded() {
+            const snap = await get(WEIGHTS_REF);
+            if (!snap.exists()) await set(WEIGHTS_REF, { wd:0.5, wr:0.5, wt:0.5, n:0 });
+        }
+        async function getWeights() { return (await get(WEIGHTS_REF)).val(); }
+        async function pushOnlineUpdate(d_val, r, t_log, label) {
+            await runTransaction(WEIGHTS_REF, (cur) => {
+                if (!cur) cur = { wd:0.5, wr:0.5, wt:0.5, n:0 };
+                const LR=0.05;
+                const we=Math.tanh(cur.wd), re=Math.tanh(cur.wr), te=Math.tanh(cur.wt);
+                const z=4*(we*d_val+re*r+te*t_log)-2;
+                const err=label-1/(1+Math.exp(-z));
+                cur.wd+=LR*err*d_val*(1-we*we);
+                cur.wr+=LR*err*r*(1-re*re);
+                cur.wt+=LR*err*t_log*(1-te*te);
+                cur.n++;
+                return cur;
+            });
+        }
+        async function getAllUsers() {
+            const snap=await get(USERS_REF);
+            if(!snap.exists()) return [];
+            return Object.entries(snap.val()).map(([k,v])=>({id:k,...v}));
+        }
+        async function getUserByNickname(nickname) {
+            const snap=await get(USERS_REF);
+            if(!snap.exists()) return null;
+            for(const [k,v] of Object.entries(snap.val()))
+                if(v.nickname===nickname) return {id:k,...v};
+            return null;
+        }
+        async function createUser(data) { await set(child(USERS_REF,data.nickname),data); }
+        async function updateUser(nickname, updates) {
+            const u=await getUserByNickname(nickname);
+            if(u) await set(child(USERS_REF,u.id),{...u,...updates});
+        }
+        async function deleteAllUsers() { await set(USERS_REF, null); }
+        async function resetWeights() { await set(WEIGHTS_REF, { wd:0.5, wr:0.5, wt:0.5, n:0 }); }
+
+        window._fb={
+            initWeightsIfNeeded, getWeights, pushOnlineUpdate,
+            getAllUsers, getUserByNickname, createUser, updateUser,
+            deleteAllUsers, resetWeights
+        };
+        await initWeightsIfNeeded();
+
+        const TEST_QUESTIONS = {
+            mid1:[
+                {id:1,type:'insert',diff:'low',points:2,text:`This process clearly shows how plants obtain the energy necessary for their survival.\n\nPlants are essential to life on Earth because they provide oxygen and serve as the base of most food chains. Without them, many ecosystems would not be able to sustain themselves. (①) In order to survive, plants must be able to obtain and use energy efficiently to carry out various biological functions. (②) One of the key mechanisms they use is photosynthesis, a process in which plants convert sunlight into chemical energy stored in organic compounds. (③) During photosynthesis, plants absorb carbon dioxide from the air and water from the soil through their roots and leaves. (④) Using sunlight, they transform substances into glucose, which serves as their primary source of energy and supports their metabolic activities. (⑤) As a result, plants can continue to grow, reproduce, and support other forms of life that depend on them for food and oxygen.`,options:['①','②','③','④','⑤'],correct:4,explanation:'답 ④'},
+                {id:2,type:'order',diff:'low',points:2,text:`Witnessing hateful expressions online does not automatically lead individuals to take action against them, even when the content is widely recognized as offensive or harmful. The assumption that awareness alone is sufficient to motivate opposition fails to capture the complexity of how people actually respond.\n\n(A) In other words, research shows that the direct connection between recognizing the seriousness of hateful content and taking any concrete counteractive measures is minimal at best, suggesting that mere awareness does not reliably translate into action.\n\n(B) Although many people assume that perceiving online hate speech as severe will naturally lead them to intervene or oppose it, this expectation oversimplifies the intricate psychological processes and emotional factors that influence human behavior in real-world contexts.\n\n(C) Instead, individuals frequently experience a range of emotional reactions—including frustration, anger, distress, or lingering discomfort—which must be processed and interpreted before they determine whether, when, and how to engage in any form of response.`,options:['① (A) - (C) - (B)','② (B) - (A) - (C)','③ (B) - (C) - (A)','④ (C) - (A) - (B)','⑤ (C) - (B) - (A)'],correct:2,explanation:'답 ②'},
+                {id:3,type:'blank',diff:'low',points:2,text:`An individual characteristic that moderates the relationship with behavior is self-efficacy, or a judgment of one's capability to accomplish a certain level of performance. People who have a high sense of self-efficacy tend to pursue challenging goals that may be outside the reach of the average person. People with a strong sense of self-efficacy, therefore, may be more willing to step outside the culturally prescribed behaviors to attempt tasks or goals for which success is viewed as improbable by the majority of social actors in a setting. For these individuals, ________________. For example, Australians tend to endorse the "Tall Poppy Syndrome." This saying suggests that any "poppy" that outgrows the others in a field will get "cut down;" in other words, any overachiever will eventually fail. Interviews and observations suggest that it is the high self-efficacy Australians who step outside this culturally prescribed behavior to actually achieve beyond average.\n* self-efficacy: 자기 효능감  ** endorse: 지지하다`,options:['① self-efficacy is not easy to define','② culture will have little or no impact on behavior','③ setting a goal is important before starting a task','④ high self-efficacy is a typical quality of Australians','⑤ judging the reaction from the community will be hard'],correct:2,explanation:'답 ②'},
+                {id:4,type:'imply',diff:'low',points:2,text:`On August 12, 1994, major league baseball players went on strike, bringing baseball to a halt for the rest of the season. The strike, which lasted 235 days, ended in April of the next year when a federal judge issued an injunction against the club owners. Just before the strike, baseball was enjoying one of the most exciting seasons in many years. The lowly Montreal Expos were leading their league by six games, Tony Gwynn was enjoying a .400 batting average, and a number of ballplayers were having banner years. Just before the strike, the famed hitter Ken Griffey, Jr., was asked what he thought about the upcoming strike, especially since he and so many other ballplayers were doing so well. He replied: We picked a bad year to have a good year.\n* injunction: (법원의) 명령`,options:['① We are disappointed with our personal records','② For the strike, we are sacrificing a great season','③ Rather than going on strike, we want to negotiate','④ We consider the strike as an act of poor sportsmanship','⑤ We admit there are different attitudes toward the strike'],correct:2,explanation:'답 ②'},
+                {id:5,type:'insert',diff:'mid',points:3,text:`There are also clinical cases that show the other side of this coin.\n\nHumans can tell lies with their faces. Although some are specifically trained to detect lies from facial expressions, the average person is often misled into believing false and manipulated facial emotions. One reason for this is that we are "two-faced." By this I mean that we have two different neural systems that manipulate our facial muscles. ( ① ) One neural system is under voluntary control and the other works under involuntary control. ( ② ) There are reported cases of individuals who have damaged the neural system that controls voluntary expressions. ( ③ ) They still have facial expressions, but are incapable of producing deceitful ones. ( ④ ) The emotion that you see is the emotion they are feeling, since they have lost the needed voluntary control to produce false facial expressions. ( ⑤ ) These people have injured the system that controls their involuntary expressions, so that the only changes in their demeanor you will see are actually willed expressions.\n* demeanor: 태도, 표정`,options:['①','②','③','④','⑤'],correct:5,explanation:'답 ⑤'},
+                {id:6,type:'order',diff:'mid',points:3,text:`A set of problems in social science centers on the limitations and design of social science research. It is not really possible to conduct some forms of controlled experiments on human beings.\n\n(A) For example, researchers cannot deliberately subject people to poverty and deprivation in order to observe the causes of violence, as such actions would be ethically unacceptable.\n\n(B) Even when some level of experimentation is possible, another difficulty arises from the conditions under which the research is conducted. In laboratory settings, many variables can be carefully controlled, but such control is rarely achievable in real-world contexts.\n\n(C) Furthermore, individuals often change their behavior simply because they are aware that they are being observed. This phenomenon, known as the Hawthorne effect, makes it difficult to determine whether the observed behavior results from the experimental conditions or from the awareness of observation itself.`,options:['① (A) - (C) - (B)','② (B) - (A) - (C)','③ (B) - (C) - (A)','④ (C) - (A) - (B)','⑤ (C) - (B) - (A)'],correct:2,explanation:'답 ②'},
+                {id:7,type:'blank',diff:'mid',points:3,text:`Gentrification is often described as a process through which neglected urban areas are revitalized, attracting new investment and a different class of residents. While such transformation may bring visible improvements, be it in infrastructure, safety, or commercial activity, it also generates less apparent consequences that unfold over time. Longtime residents, whose ties to the neighborhood are rooted in years of shared experience, may find themselves increasingly unable to remain, as rising costs outpace their means. At the center of this tension lies what many observers fail to fully acknowledge: ___________________. As property values increase, landlords and developers are incentivized to prioritize those who can afford higher rents, gradually altering not only the economic composition of the area but also its cultural identity. What appears, at first glance, to be a natural evolution of the neighborhood can thus be understood instead as a selective process, one that privileges certain groups while displacing others. [3점]`,options:['① urban renewal produces benefits across all social groups','② the change in cities rarely influences patterns of residence','③ the process occurs systematically excluding existing residents','④ cultural identity remains unaffected during the transformation','⑤ current communities tend to resist any external investment'],correct:3,explanation:'답 ③'},
+                {id:8,type:'imply',diff:'mid',points:3,text:`Marx may have understood the future better than his own century. For much of the twentieth century, discussions of Karl Marx were often framed around ideological conflict rather than practical policy. Yet the rapid development of artificial intelligence has revived questions that resemble those Marx raised about labor, ownership, and the distribution of wealth. Optimistic advocates of AI frequently emphasize not only productivity gains but also the necessity of redistributing the immense profits generated by automated systems. The difficulty, however, lies in determining the principle according to which such distribution should occur. If millions of individuals indirectly contribute data, language patterns, and behavioral information that enable AI development, then measuring each person's exact contribution becomes nearly impossible. Consequently, some theorists argue that certain forms of AI-generated wealth may ultimately require broader public management rather than remaining concentrated in private ownership alone. It is precisely through this line of reasoning that Marx reemerges in contemporary discussions of technology and distribution. [3점]`,options:['① Modern societies should reject AI development because automation inevitably weakens economic productivity','② Capitalist institutions can preserve stability only by eliminating state involvement in technological industries','③ The growth of AI strengthens the argument that certain forms of wealth distribution may need collective oversight','④ The economic value generated by AI can be measured precisely through individual labor contribution','⑤ Technological innovation becomes socially beneficial only when private ownership is completely abolished'],correct:3,explanation:'답 ③'},
+                {id:9,type:'insert',diff:'high',points:4,text:`We become entrusted to teach culturally appropriate behaviors, values, attitudes, skills, and information about the world.\n\nErikson believes that when we reach the adult years, several physical, social, and psychological stimuli trigger a sense of generativity. A central component of this attitude is the desire to care for others. ( ① ) For the majority of people, parenthood is perhaps the most obvious and convenient opportunity to fulfill this desire. ( ② ) Erikson believes that another distinguishing feature of adulthood is the emergence of an inborn desire to teach. ( ③ ) We become aware of this desire when the event of being physically capable of reproducing is joined with the events of participating in a committed relationship, the establishment of an adult pattern of living, and the assumption of job responsibilities. ( ④ ) According to Erikson, by becoming parents we learn that we have the need to be needed by others who depend on our knowledge, protection, and guidance. ( ⑤ ) By assuming the responsibilities of being primary caregivers to children through their long years of physical and social growth, we concretely express what Erikson believes to be an inborn desire to teach.`,options:['①','②','③','④','⑤'],correct:5,explanation:'답 ⑤'},
+                {id:10,type:'order',diff:'high',points:4,text:`It is possible to determine the distance of galaxies and other celestial objects, but how exactly is this achieved? More broadly, how do astronomers measure the distances to objects throughout the universe? For stars that are relatively close to Earth, the most reliable approach relies on a technique known as 'stellar parallax'.\n\n(A) The parallax method fundamentally involves knowing the separation between two observational points—in the simplest case, the human eyes—and using the apparent angular displacement of an object against a distant background to calculate its distance. This principle employs distance measurements for nearby stars in astrophysics.\n\n(B) To visualize the concept, hold your finger at arm's length and alternately close each eye. You will notice that the finger seems to shift laterally relative to distant background objects, a perceptual effect often described as a "hop" in position.\n\n(C) This apparent motion occurs because each eye provides a slightly different vantage point. The closer the object, the more pronounced the lateral displacement; conversely, as the object moves farther away, the displacement diminishes accordingly.\n*alternately : 번갈아 하는  *parallax : 시차`,options:['① (A) - (C) - (B)','② (B) - (A) - (C)','③ (B) - (C) - (A)','④ (C) - (A) - (B)','⑤ (C) - (B) - (A)'],correct:3,explanation:'답 ③'},
+                {id:11,type:'blank',diff:'high',points:4,text:`Probability is often invoked as though it directly quantified how likely a hypothesis is to be true; yet, in practice, what is observed must be evaluated relative to what might have been observed instead. Suppose you examine a sample to assess a vaccine's effectiveness and, finding few infections, are inclined to take this as confirmation. Such reasoning overlooks that data, by themselves, do not privilege any single account. It is here that likelihood — a function not of outcomes given parameters, but of parameters given outcomes — reorients the analysis, requiring that what is seen be weighed against what competing assumptions would render most expected. Thus, even when an observation appears compatible with a given explanation, its force depends on how it stands in comparison to alternatives. Consider, then, a coin toss. While one may assign a probability of 0.5 to heads, let this probability remain an unknown, p. If, upon tossing the coin 100 times, 70 heads are observed, it is not the assumed value but rather that p for which ____________________________ that constitutes, within this coin-tossing game, the true probability. [4점]`,options:['① the observed outcome is most probable','② the discrepancy between expectation and result is minimized','③ the probability of heads converges to a fixed value','④ the observed outcome is most consistent with that value','⑤ the role of alternative assumptions is eliminated'],correct:4,explanation:'답 ④'},
+                {id:12,type:'imply',diff:'high',points:4,text:`In recent years, scientific research has become increasingly shaped by systems of evaluation intended to measure academic influence. Universities, funding agencies, and research institutions frequently rely on citation counts, publication rankings, and numerical impact scores when assessing the value of scholarly work. Although such measures were originally introduced as practical tools for comparing large volumes of research, critics argue that they have gradually begun to influence not only how research is evaluated, but also how it is conducted. Some researchers now avoid unconventional or long-term projects because such work may produce fewer immediate publications or attract less predictable attention within academic networks. As a result, studies that are more likely to generate rapid visibility are often prioritized over inquiries that may carry deeper intellectual significance but require years of uncertainty and slow development. Reflecting on this tendency, one scholar remarked that "people had started watering the thermometer instead of the plant."`,options:['① Quantitative measures of research quality were encouraging researchers to pursue goals that could be more easily evaluated','② Researchers were becoming increasingly dependent on systems of evaluation and academic visibility in determining the direction of their work','③ The methods used to measure research quality were beginning to replace the true goals of research itself','④ Academic institutions were encouraging researchers to produce more practical results','⑤ Researchers were relying too heavily on technology to conduct scientific studies'],correct:3,explanation:'답 ③'}
+            ],
+            mid2:[
+                {id:1,type:'insert',diff:'low',points:2,text:`That is why people experience jet lag when traveling across time zones.\n\nIn humans, body clocks regulate daily changes in blood pressure, body temperature, hormones, hunger, thirst, and sleep-wake cycles. (①) These biological rhythms, experienced as internal time, likely developed over millions of years of evolution. (②) They produce physiological and behavioral changes on a roughly twenty-four-hour cycle regardless of external conditions. (③) When people travel across time zones, their internal clocks continue to follow the schedule of the place they left rather than the new local time, and this mismatch lasts for some time. (④) However, body clocks can eventually be readjusted by environmental cues such as light and temperature. (⑤) As a result, although people may feel temporary discomfort, their bodies gradually adapt to the new time zone.\n*jet lag: 시차로 인한 피로`,options:['①','②','③','④','⑤'],correct:4,explanation:'답 ④'},
+                {id:2,type:'order',diff:'low',points:2,text:`Food plays a large part in how much you enjoy the outdoors. The possibilities are endless, so you can constantly vary your diet.\n\n(A) They walk only a few miles each day and may use the same campsite for several nights. Survival eaters eat some dry cereal for breakfast, and are up and walking within minutes of waking.\n\n(B) Wilderness dining has two extremes: gourmet eaters and survival eaters. The first like to make camp at lunchtime so they have several hours to set up field ovens; they bake cakes and bread and cook multi-course dinners.\n\n(C) They walk dozens of miles every day; lunch is a series of cold snacks eaten on the move. Dinner consists of a freeze-dried meal, "cooked" by pouring hot water into the package.\n*gourmet eaters : 미식가`,options:['① (A) - (C) - (B)','② (B) - (A) - (C)','③ (B) - (C) - (A)','④ (C) - (A) - (B)','⑤ (C) - (B) - (A)'],correct:2,explanation:'답 ②'},
+                {id:3,type:'blank',diff:'low',points:2,text:`For most of human history, maps were valued because they enabled people to navigate unfamiliar environments with greater accuracy and confidence. Today, however, digital navigation systems do far more than merely provide directions. Because such systems instantly calculate routes, adjust to traffic conditions, and continuously correct users when they make wrong turns, many people no longer feel the need to actively observe or mentally organize the spaces through which they travel. Researchers studying spatial cognition have found that frequent users of navigation apps are often less capable of recalling streets, landmarks, or the overall layout of an area after completing a journey. In some cases, individuals successfully arrive at their destination while retaining only a vague sense of how the route was structured. This suggests that convenience may sometimes weaken the cognitive processes involved in learning from direct experience. When technology assumes too much responsibility for orientation and decision-making, people may gradually lose _____________________.`,options:['① the ability to interpret and navigate physical space independently','② motivation to improve the efficiency of digital navigation systems','③ trust in the reliability of technological information','④ opportunities to experience unfamiliar environments safely','⑤ awareness of how transportation influences urban development'],correct:1,explanation:'답 ①'},
+                {id:4,type:'imply',diff:'low',points:2,text:`Modern society offers people an unprecedented number of ways to express themselves. Through social media, personal branding, and online communities, individuals are constantly encouraged to display their opinions, preferences, and identities to others. Yet some philosophers argue that this culture of constant expression may actually weaken genuine self-understanding. When people become too focused on how their thoughts will be received, approved of, or repeated by others, they may gradually lose the ability to distinguish between beliefs they truly arrived at through reflection and ideas they merely absorbed from surrounding reactions. In discussing this tendency, one philosopher warned that "they began listening to the applause instead of the music."`,options:["① People were becoming too emotionally dependent on online relationships","② Individuals often valued others' reactions more than sincere self-reflection","③ Modern society discouraged people from developing unique identities","④ Philosophers believed that public expression was necessary for self-understanding","⑤ Online communication was replacing meaningful face-to-face interaction"],correct:2,explanation:'답 ②'},
+                {id:5,type:'insert',diff:'mid',points:3,text:`So, there was a social pressure for art to come up with some vocation that both distinguished it from science and, at the same time, made it equal in stature to science.\n\nRepresentational theories of art treat the work of the artist as similar to that of the scientist. Both, so to speak, are involved in describing the external world. ( ① ) But by the nineteenth century, any comparison between the scientist and the artist was bound to make the artist look like a poor relation in terms of making discoveries about the world or holding a mirror up to nature. ( ② ) Here, science clearly had the edge. ( ③ ) The notion that art specialized in the expression of the emotions was particularly attractive in this light. ( ④ ) It rendered unto science its own ― the exploration of the objective world ― while saving something comparably important for art to do ― to explore the inner world of feeling. ( ⑤ ) If science held the mirror up to nature, art turned a mirror at the self and its experiences.\n*vocation: 소명  **stature: 수준  ***render: 주다`,options:['①','②','③','④','⑤'],correct:3,explanation:'답 ③'},
+                {id:6,type:'order',diff:'mid',points:3,text:`The impact of color has been studied for decades. For example, in a factory, the temperature was maintained at 72℉ and the walls were painted a cool blue-green. The employees complained of the cold.\n\n(A) The psychological effects of warm and cool hues seem to be used effectively by the coaches of the Notre Dame football team. The locker rooms used for half-time breaks were reportedly painted to take advantage of the emotional impact of certain hues.\n\n(B) The home-team room was painted a bright red, which kept team members excited or even angered. The visiting-team room was painted a blue-green, which had a calming effect on the team members. The success of this application of color can be noted in the records set by Notre Dame football teams.\n\n(C) The temperature was maintained at the same level, but the walls were painted a warm coral. The employees stopped complaining about the temperature and reported they were quite comfortable.\n* hue: 색조, 색상`,options:['① (A) - (C) - (B)','② (B) - (A) - (C)','③ (B) - (C) - (A)','④ (C) - (A) - (B)','⑤ (C) - (B) - (A)'],correct:4,explanation:'답 ④'},
+                {id:7,type:'blank',diff:'mid',points:3,text:`Establishing protected areas with intact ecosystems is essential for species conservation. It is, however, shortsighted to rely solely on protected areas to preserve biodiversity. Such reliance can create a paradoxical situation in which species and ecosystems inside the protected areas are preserved while the same species and ecosystems outside are allowed to be damaged, which in turn results in_______________. This is due in part to the fact that many species must migrate across protected area boundaries to access resources that the protected area itself cannot provide. In India, for example, tigers leave their protected areas to hunt in the surrounding human-dominated landscape. In general, the smaller the protected area, the more it depends on unprotected neighboring lands for the long-term maintenance of biodiversity. Unprotected areas, including those immediately outside protected areas, are thus crucial to an overall conservation strategy.`,options:["① the decline of biodiversity within the protected areas","② the fall in migration of species to the unprotected areas","③ the increase of predators' migration to the protected areas","④ the balance and harmony between humanity and biodiversity","⑤ the improvement in preserving human-dominated landscapes"],correct:1,explanation:'답 ①'},
+                {id:8,type:'imply',diff:'mid',points:3,text:`A glass resting on a table may appear stable and permanent, yet a single impact can reduce it to scattered fragments across the floor. What makes this transformation significant is not merely the visible destruction itself, but the difference in how many microscopic arrangements each state allows. There are relatively few ways for the particles of the glass to remain organized in the precise structure of an intact object, whereas there are vastly more configurations corresponding to shattered pieces. Once broken, the system therefore enters a condition that can be realized through far more possible arrangements. This observation is closely related to the second law of thermodynamics, according to which entropy tends to increase over time. Physicists accordingly interpret entropy not simply as "disorder," but as a measure of how many microscopic possibilities are available to a system. From this perspective, physical processes do not proceed toward destruction because nature somehow intends chaos. Rather, systems evolve toward states that are statistically easier to realize because they occupy overwhelmingly larger ranges of possibility. In this sense, the universe drifts not toward chaos itself, but toward what chaos renders most accessible. [3점]\n*thermodynamics: 열역학  **entropy: 엔트로피  ***configuration: 배열 상태`,options:['① Natural systems tend to preserve highly ordered structures whenever possible','② Microscopic order becomes more probable when the number of configurations is limited','③ Entropy decreases as systems move toward more stable and predictable arrangements','④ The direction of physical change is influenced by the statistical availability of possible states','⑤ Physical destruction occurs because matter inherently seeks chaotic conditions'],correct:4,explanation:'답 ④'},
+                {id:9,type:'insert',diff:'high',points:4,text:`The researchers had made this happen by lengthening the period of daylight to which the peach trees on whose roots the insects fed were exposed.\n\nExactly how cicadas keep track of time has always intrigued researchers, and it has always been assumed that the insects must rely on an internal clock. Recently, however, one group of scientists working with the 17-year cicada in California have suggested that the nymphs use an external cue and that they can count. ( ① ) For their experiments they took 15-year-old nymphs and moved them to an experimental enclosure. ( ② ) These nymphs should have taken a further two years to emerge as adults, but in fact they took just one year. ( ③ ) By doing this, the trees were "tricked" into flowering twice during the year rather than the usual once. ( ④ ) Flowering in trees coincides with a peak in amino acid concentrations in the sap that the insects feed on. ( ⑤ ) So it seems that the cicadas keep track of time by counting the peaks.\n* nymph: 애벌레  ** sap: 수액`,options:['①','②','③','④','⑤'],correct:3,explanation:'답 ③'},
+                {id:10,type:'order',diff:'high',points:4,text:`To modern man disease is a biological phenomenon that concerns him only as an individual and has no moral implications. When he contracts influenza, he never attributes this event to his behavior toward the tax collector or his mother-in-law.\n\n(A) Sometimes they may not strike the guilty person himself, but rather one of his relatives or tribesmen, to whom responsibility is extended. Disease, action that might produce disease, and recovery from disease are, therefore, of vital concern to the whole primitive community.\n\n(B) Disease, as a sanction against social misbehavior, becomes one of the most important pillars of order in such societies. It takes over, in many cases, the role played by policemen, judges, and priests in modern society.\n\n(C) Among primitives, because of their supernaturalistic theories, the prevailing moral point of view gives a deeper meaning to disease. The gods who send disease are usually angered by the moral offences of the individual.\n* sanction: 제재`,options:['① (A) - (C) - (B)','② (B) - (A) - (C)','③ (B) - (C) - (A)','④ (C) - (A) - (B)','⑤ (C) - (B) - (A)'],correct:4,explanation:'답 ④'},
+                {id:11,type:'blank',diff:'high',points:4,text:`Retirement planning is frequently construed as a matter of maximizing terminal wealth, as though financial security were reducible to the aggregate valuation of accumulated assets. Yet such a conception neglects the distinction between appreciation and distribution. Prior to retirement, funds allocated to dividend-paying equities or other yield-bearing securities cease to function as disposable income and are instead reclassified as capital committed to deferred consumption. Consequently, the investor may perceive this allocation as a diminution of present liquidity, particularly because the utility of retained earnings and compounded returns remains temporally remote. The relevance of such investments, however, emerges once retirement displaces earned wages as the organizing principle of economic life. At that stage, the issue is neither whether one possesses appreciating assets nor whether returns derive primarily from capital gains, but whether accumulated capital can be reconfigured into recurrent distributions no longer contingent upon one's principal occupation and therefore absent from immediately consumable cash reserves. Likewise, under the actuarial framework in which principal and returns are amortized over a predetermined horizon, retirement planning succeeds insofar as ________________________. [4점]\n*retained earnings: 유보 이익  **annuity: 연금  ***principal: 원금`,options:['① deferred consumption preserves nominal asset appreciation while minimizing capital erosion','② appreciation in equity valuation compensates for the contraction of disposable liquidity','③ retained earnings obviate the necessity of converting appreciated assets into distributions','④ compounded returns stabilize purchasing power independently of fluctuations in expenditure','⑤ recurrent distributions substitute for labor-dependent liquidity with actuarial regularity'],correct:5,explanation:'답 ⑤'},
+                {id:12,type:'imply',diff:'high',points:4,text:`Honeybee navigation has long challenged the assumption that sophisticated spatial representation necessitates correspondingly sophisticated cognition. In the waggle dance, a returning forager communicates the direction and distance of a food source through oscillatory movements whose orientation encodes angular deviation relative to the sun. Yet the interpretive mechanism employed by other bees is not reducible to simple visual imitation. Because such dances are frequently performed within the darkness of the hive, recruits must instead infer directional information by integrating tactile perception with a constant downward vector. In effect, the vertical axis of the comb functions as a surrogate celestial framework, allowing external coordinates to be transposed into bodily orientation despite the sun's physical absence. What appears, then, to be a symbolic exchange of information remains inseparable from the organism's attunement to forces that do not originate within the hive itself. Even flight, in this sense, requires resistance in the opposite direction. [4점]\n*oscillatory: 진동하는  **surrogate: 대리물`,options:['① Complex navigation becomes possible only when internal signals are detached from external constraints','② Symbolic communication within biological systems presupposes continual calibration against external reference structures','③ The absence of visual information compels organisms to rely exclusively upon instinctive behavior','④ Spatial coordination among honeybees emerges primarily from imitation rather than embodied perception','⑤ Effective movement through space depends upon minimizing interference from opposing forces'],correct:2,explanation:'답 ②'}
+            ],
+            post:[
+                {id:1,type:'insert',diff:'low',points:2,text:`They also rated how generally extroverted those fake extroverts appeared, based on their recorded voices and body language.\n\nSome years ago, a psychologist named Richard Lippa called a group of introverts to his lab and asked them to act like extroverts while pretending to teach a math class. ( ① ) Then he and his team, with video cameras in hand, measured the length of their strides, the amount of eye contact they made with their "students," the percentage of time they spent talking, and the volume of their speech. ( ② ) Then Lippa did the same thing with actual extroverts and compared the results. ( ③ ) He found that although the latter group came across as more extroverted, some of the fake extroverts were surprisingly convincing. ( ④ ) It seems that most of us know how to fake it to some extent. ( ⑤ ) Whether or not we're aware that the length of our strides and the amount of time we spend talking and smiling mark us as introverts and extroverts, we know it unconsciously.`,options:['①','②','③','④','⑤'],correct:2,explanation:'답 ②'},
+                {id:2,type:'order',diff:'low',points:2,text:`Since group performance in problem solving is superior to even the individual work of the most expert group members, it should not be surprising that students learn better when they cooperate. However, there is one issue that needs further consideration.\n\n(A) In addition to that benefit, helping lower-ability students often pulls higher-ability students to a more sophisticated understanding of the material. The cliché that teachers learn as much as their pupils is certainly true.\n\n(B) Not quite. Knowledge, happily, is not a zero-sum product. Higher-ability students can reinforce their own knowledge by teaching those with lower ability.\n\n(C) Specifically, the technique of having students help one another raises the question of whether students with lower ability are being helped at the expense of those with higher ability. Is this true?`,options:['① (A) - (C) - (B)','② (B) - (A) - (C)','③ (B) - (C) - (A)','④ (C) - (A) - (B)','⑤ (C) - (B) - (A)'],correct:5,explanation:'답 ⑤'},
+                {id:3,type:'blank',diff:'low',points:2,text:`In The Prince, Niccolò Machiavelli argued that a ruler could maintain power either by being loved or by being feared. At the time, many people criticized his ideas because they seemed to justify harsh and even cruel methods of leadership. For this reason, Machiavelli was often remembered as a thinker who supported ruling through fear rather than morality. However, modern interpretations of his work tend to focus less on fear itself and more on the importance of maintaining stability and trust within an organization. In today's workplaces, for example, leaders cannot freely control employees through intimidation because such behavior is considered unethical and harmful. As a result, many people now believe that Machiavelli's argument is most relevant today when it is understood as supporting __________________. [2점]\n*intimidation: 협박`,options:['① leadership based on fear and strict punishment','② the complete rejection of authority in organizations','③ kind and respectful leadership that builds cooperation','④ political systems that avoid communication with workers','⑤ the use of intimidation to increase employee productivity'],correct:3,explanation:'답 ③'},
+                {id:4,type:'imply',diff:'low',points:2,text:`Two coworkers may leave the same meeting with completely different impressions of what was said. Imagine that James says to a colleague, "I think your report could be organized more clearly." One listener may understand this as constructive advice, while another may interpret it as a personal criticism. In many cases, such differences do not arise solely from the words themselves. A person who enters the conversation already stressed, irritated, or insecure may unconsciously interpret neutral comments in a negative way. Psychologists therefore warn that people sometimes listen less to others than to the emotion they carried into the room. In such cases, misunderstandings arise not because the speaker communicated poorly, but because the listener filtered the conversation through a preexisting emotional condition. This helps explain why two individuals can experience the same interaction in completely different ways. As a result, emotional self-awareness is considered an important factor in improving communication and reducing unnecessary conflict. [2점]`,options:['① People are more likely to trust criticism from close coworkers','② Preexisting emotions can influence how communication is interpreted','③ Constructive advice is often misunderstood because it lacks clarity','④ Listeners usually react negatively to comments given in formal meetings','⑤ Emotional reactions become weaker when conversations are repeated'],correct:2,explanation:'답 ②'},
+                {id:5,type:'insert',diff:'mid',points:3,text:`It isn't, however, such a hit with police officers and district attorneys, who have criticized the series for presenting a highly misleading image of how crimes are solved.\n\nSince its debut in 2000, an American crime investigation drama has become extremely popular both in the United States and abroad. Many viewers were attracted to its combination of scientific investigation and dramatic storytelling. ( ① ) In 2002, it became the most watched show on American television, and by 2009 its worldwide audience exceeded 73 million. The popularity of the series even increased students' interest in forensic science. ( ② ) They argue that the show gives viewers the impression that scientific evidence is always easy to obtain and completely reliable. ( ③ ) Their concerns have been echoed by criminologist Monica Robbers, who found that jurors increasingly expect unrealistic levels of forensic evidence in criminal cases. ( ④ ) Bernard Knight, formerly one of Britain's chief pathologists, also agrees. He argues that television crime dramas exaggerate the speed and certainty of forensic science for entertainment purposes. ( ⑤ ) Jurors today, he observes, expect clearer proof than forensic science is actually capable of delivering.`,options:['①','②','③','④','⑤'],correct:2,explanation:'답 ②'},
+                {id:6,type:'order',diff:'mid',points:3,text:`According to one traditional definition, aesthetics is the branch of philosophy that deals with beauty, particularly beauty in the arts. Examining the aesthetically pleasing features of the Mona Lisa or a snow-capped mountain, for instance, would fall within the domain of aesthetics.\n\n(A) Consider Picasso's Guernica, a massive (11-ft. × 25.6-ft.) painting in black, white, and grey that he created in response to the massacre of Spanish civilians by German and Italian warplanes during the Spanish Civil War. Images of brutal warfare dominate the canvas.\n\n(B) That definition seems overly restrictive, however, since works of art and natural objects may engage us in ways other than by being beautiful. Rather than evoking admiration of beauty, artists may provoke puzzlement, shock, or even disgust.\n\n(C) This work is widely admired, but not on account of its beauty. Thus, a more adequate definition of aesthetics would be that it is the branch of philosophy that deals with the ways in which things please people in the course of being experienced.`,options:['① (A) - (C) - (B)','② (B) - (A) - (C)','③ (B) - (C) - (A)','④ (C) - (A) - (B)','⑤ (C) - (B) - (A)'],correct:2,explanation:'답 ②'},
+                {id:7,type:'blank',diff:'mid',points:3,text:`Cloud storage is often presented as a convenient alternative to keeping files on personal devices, allowing users to access data from multiple locations without relying on physical hardware. While this flexibility has transformed the way information is managed, it has also altered the relationship between users and their own data in less obvious ways. Many people assume that uploading files to a cloud service simply relocates them to a safer environment, but the process involves a far more complex system of distribution and control. Data uploaded to the cloud is frequently divided, duplicated, and stored across numerous servers so that access can remain stable even if part of the system fails. At the same time, users rarely know where their information is physically located or how it is being managed behind the interface. What makes cloud computing effective, therefore, is not merely the existence of remote storage itself, but ___________________. [3점]`,options:['① the ability of distributed systems to maintain accessibility despite localized failures','② the tendency of users to prefer physical ownership of their stored information','③ the elimination of security risks through complete centralization of data','④ the reduction of network traffic by limiting access from multiple devices','⑤ the replacement of hardware infrastructure with individually managed servers'],correct:1,explanation:'답 ①'},
+                {id:8,type:'imply',diff:'mid',points:3,text:`Here's an interesting thought. If glaciers started re-forming, they have a great deal more water now to draw on ― Hudson Bay, the Great Lakes, the hundreds of thousands of lakes of Canada, none of which existed to fuel the last ice sheet ― so they would grow very much quicker. And if they did start to advance again, what exactly would we do? Blast them with TNT or maybe nuclear missiles? Well, doubtless we would, but consider this. In 1964, the largest earthquake ever recorded in North America rocked Alaska with 200,000 megatons of concentrated might, the equivalent of 2,000 nuclear bombs. Almost 3,000 miles away in Texas, water sloshed out of swimming pools. A street in Anchorage fell twenty feet. The quake devastated 24,000 square miles of wilderness, much of it glaciated. And what effect did all this might have on Alaska's glaciers? None.\n* slosh: 철벅철벅 튀다  ** devastate: 황폐시키다`,options:['① It would be of no use to try to destroy glaciers','② The melting glaciers would drive the rise of the sea level','③ The Alaskan wilderness would not be harmed by glaciers','④ Re-forming glaciers would not spread over North America','⑤ The causes of glacier re-formation would not include quakes'],correct:1,explanation:'답 ①'},
+                {id:9,type:'insert',diff:'high',points:4,text:`The net effect of this was that, although customers benefited, the banks lost out as their costs increased but the total number of customers stayed the same.\n\nIn mature markets, breakthroughs that lead to a major change in competitive positions and to the growth of the market are rare. ( ① ) Because of this, competition becomes a zero sum game in which one organization can only win at the expense of others. ( ② ) However, where the degree of competition is particularly intense a zero sum game can quickly become a negative sum game, in that everyone in the market is faced with additional costs. ( ③ ) As an example of this, when one of the major high street banks in Britain tried to gain a competitive advantage by opening on Saturday mornings, it attracted a number of new customers who found the traditional Monday-Friday bank opening hours to be a constraint. ( ④ ) However, faced with a loss of customers, the competition responded by opening on Saturdays as well. ( ⑤ ) In essence, this proved to be a negative sum game.`,options:['①','②','③','④','⑤'],correct:5,explanation:'답 ⑤'},
+                {id:10,type:'order',diff:'high',points:4,text:`That ice can flow is contrary to everyday experience. An ice cube from the freezer placed on a table does not flow; it simply sits there and melts. Because of this familiar observation, people naturally assume that solid ice cannot move. Yet glaciers, which are also made of ice, slowly move across land over long periods of time.\n\n(A) This is why an ordinary ice cube cannot flow. Its size is too small for the stress produced by gravity to overcome the internal strength of the ice. However, as the size of a mass of ice increases, gravity-induced stress becomes greater while the ice's internal strength remains nearly the same. Eventually, a point is reached at which slow flow begins.\n\n(B) An ice cube is simply too small for such movement to occur. A mass of ice thousands of times larger, however, can bend and spread under its own weight, eventually flowing like a glacier. In fact, the movement of glacier ice is caused by gravity, the same force that makes river water flow downhill.\n\n(C) When gravity-induced stress becomes stronger than the force holding ice particles together, atoms and molecules begin to slip past one another downslope. For this movement to occur, the force produced by gravity must exceed a certain minimum level called the ice's internal strength. Otherwise, the ice remains rigid and does not flow.`,options:['① (A) - (C) - (B)','② (B) - (A) - (C)','③ (B) - (C) - (A)','④ (C) - (A) - (B)','⑤ (C) - (B) - (A)'],correct:3,explanation:'답 ③'},
+                {id:11,type:'blank',diff:'high',points:4,text:`For many Korean learners of English, fluency is initially measured by the ability to comprehend spoken language or reproduce memorized expressions. Yet prolonged exposure to the language often produces a more disorienting realization at the very stage when one first attempts independent composition. A learner who has accumulated sufficient vocabulary and syntactic familiarity may discover that recognizing a word aurally does not entail the ability to reproduce it orthographically. To speakers of Korean, whose writing system exhibits a comparatively systematic correspondence between phoneme and grapheme, this can appear unexpectedly counterintuitive. English, by contrast, preserves numerous historical layers of pronunciation, borrowing, and orthographic convention that disrupt such predictability. Thus, even when a learner distinctly recalls a pronunciation such as /f/, uncertainty may persist between spellings like "f," "ph," or even "gh," while the sound /ʃən/ may emerge as "-tion," "-sion," or "-cian." The difficulty, therefore, lies not merely in memorizing vocabulary, but in confronting a linguistic system in which pronunciation and spelling have become only partially synchronized. Consequently, what many advanced learners eventually recognize is that English orthography operates less as a direct transcription of speech than as ________________________. [4점]\n*orthography: 철자 체계  **grapheme: 문자 체계의 최소 단위 문자`,options:['① a phonetic system whose historical consistency enables spelling to be inferred from pronunciation','② an intuitive incongruity through which spelling cannot reliably be inferred from sound','③ a symbolic mechanism preserving pronunciation by eliminating competing spelling conventions','④ a standardized correspondence in which orthographic variation generates distinct pronunciations over time','⑤ a linguistic structure whose contemporary pronunciations are systematically reconstructed from orthography'],correct:3,explanation:'답 ③'},
+                {id:12,type:'imply',diff:'high',points:4,text:`You have likely encountered Thomas Kuhn's idea that science advances through periodic "paradigm shifts," moments in which established ways of understanding the world are replaced by fundamentally new ones. In his critique, Karl Popper did not deny that scientific communities often experience such abrupt conceptual transformations. What concerned him, rather, was the epistemological authority Kuhn appeared to derive from these recurring historical patterns. Kuhn's account described repeated transitions in the history of science, yet for Popper recurrence alone could not establish a law governing the development of knowledge. To infer necessity from repetition, he argued, was to mistake retrospective narration for scientific explanation. More troubling still was the possibility that such reasoning could evade genuine refutation: if paradigm shifts were treated as historically inevitable, then apparent exceptions could always be reinterpreted after the fact rather than falsifying the theory itself. In this respect, Popper regarded Kuhn's position as perilously close to historicism — the belief that history unfolds according to discoverable laws. A chronology, he implied, does not become a mechanism merely by repeating itself. [4점]\n*epistemological: 인식론적인  **retrospective: 회고적인  ***refutation: 반박, 논박`,options:['① Repeated historical patterns may simulate explanation without establishing falsifiable causal laws','② Scientific paradigms acquire explanatory force precisely because they recur throughout intellectual history','③ The inevitability of paradigm shifts allows apparent counterexamples to reinforce rather than weaken a theory','④ Historical repetition demonstrates that scientific development proceeds according to deterministic structures','⑤ The history of science becomes scientifically meaningful only when interpreted through stable paradigms'],correct:1,explanation:'답 ①'}
+            ]
+        };
+
+        const ANSWER_MAP={
+            blank_high_1:5,blank_high_2:1,blank_high_3:4,blank_high_4:2,blank_high_5:2,blank_high_6:3,blank_high_7:5,blank_high_8:3,blank_high_9:5,
+            blank_mid_1:1,blank_mid_2:3,blank_mid_3:1,blank_mid_4:1,blank_mid_5:5,blank_mid_6:4,blank_mid_7:2,blank_mid_8:3,blank_mid_9:3,blank_mid_10:3,blank_mid_11:2,blank_mid_12:1,blank_mid_13:2,blank_mid_14:2,blank_mid_15:1,blank_mid_16:4,blank_mid_17:2,blank_mid_18:2,blank_mid_19:2,blank_mid_20:1,blank_mid_21:1,
+            blank_low_1:2,blank_low_2:2,blank_low_3:1,blank_low_4:3,blank_low_5:3,blank_low_6:2,blank_low_7:3,blank_low_8:2,blank_low_9:3,
+            insert_high_1:5,insert_high_2:5,insert_high_3:5,insert_high_4:5,insert_high_5:5,insert_high_6:5,insert_high_7:5,insert_high_8:2,insert_high_9:3,
+            insert_mid_1:3,insert_mid_2:3,insert_mid_3:4,insert_mid_4:4,insert_mid_5:3,insert_mid_6:4,insert_mid_7:4,insert_mid_8:3,insert_mid_9:4,insert_mid_10:4,insert_mid_11:5,insert_mid_12:4,insert_mid_13:4,insert_mid_14:4,insert_mid_15:4,
+            insert_low_1:4,insert_low_2:4,insert_low_3:4,insert_low_4:4,insert_low_5:4,insert_low_6:4,insert_low_7:4,insert_low_8:3,insert_low_9:4,
+            order_high_1:2,order_high_2:4,order_high_3:2,order_high_4:5,order_high_5:2,order_high_6:1,order_high_7:3,order_high_8:5,order_high_9:5,
+            order_mid_1:3,order_mid_2:4,order_mid_3:3,order_mid_4:4,order_mid_5:2,order_mid_6:4,order_mid_7:2,order_mid_8:3,order_mid_9:4,order_mid_10:2,order_mid_11:3,order_mid_12:3,order_mid_13:5,order_mid_14:2,order_mid_15:3,order_mid_16:3,order_mid_17:3,order_mid_18:5,order_mid_19:2,order_mid_20:5,order_mid_21:3,order_mid_22:2,order_mid_23:3,order_mid_24:2,order_mid_25:3,order_mid_26:5,
+            order_low_1:4,order_low_2:2,order_low_3:2,order_low_4:2,order_low_5:2,order_low_6:3,order_low_7:2,order_low_8:5,order_low_9:3,order_low_10:3,order_low_11:4,
+            imply_high_1:3,imply_high_2:3,imply_high_3:4,imply_high_4:2,imply_high_5:3,imply_high_6:2,imply_high_7:5,imply_high_8:5,imply_high_9:2,
+            imply_mid_1:3,imply_mid_2:2,imply_mid_3:4,imply_mid_4:3,imply_mid_5:4,imply_mid_6:5,imply_mid_7:5,imply_mid_8:1,imply_mid_9:2,
+            imply_low_1:1,imply_low_2:2,imply_low_3:2,imply_low_4:1,imply_low_5:4,imply_low_6:1,imply_low_7:1,imply_low_8:2,imply_low_9:4
+        };
+        function generateStudyData(){
+            const cfg=[{type:'blank',diff:'high',count:9},{type:'blank',diff:'mid',count:21},{type:'blank',diff:'low',count:9},{type:'insert',diff:'high',count:9},{type:'insert',diff:'mid',count:15},{type:'insert',diff:'low',count:9},{type:'order',diff:'high',count:9},{type:'order',diff:'mid',count:26},{type:'order',diff:'low',count:11},{type:'imply',diff:'high',count:9},{type:'imply',diff:'mid',count:9},{type:'imply',diff:'low',count:9}];
+            const data=[];let id=1;
+            for(const{type,diff,count}of cfg)for(let i=1;i<=count;i++){const key=`${type}_${diff}_${i}`;data.push({id,type,diff,img:`images/study/${key}.png`,expl:`images/study/${key}_expl.png`,correct:ANSWER_MAP[key]??1});id++;}
+            return data;
+        }
+        const studyData=generateStudyData();
+        const D_MAP={low:1.0,mid:1.1,high:1.5};
+        const K1=0.15,K2=0.75;
+
+        window.APP_STATE={
+            currentUser:null, timerInterval:null, seconds:0, testTimeLeft:1800,
+            currentTool:'pen', currentStudyIdx:0, currentPage:1, isGraded:false,
+            canvasStorage:{}, explCanvasStorage:{},
+            selectedAnswers:{}, currentTestType:'', isExplOpen:false,
+            currentDiff:'mid', selectedStudyAns:null,
+            usedStudyIds:new Set(), currentStudyLogs:[],
+            explCanvasSize:{w:0,h:0}
+        };
+
+        function f_prob(d,r,t,wd,wr,wt){const we=Math.tanh(wd),re=Math.tanh(wr),te=Math.tanh(wt);return Math.min(Math.max(1/(1+Math.exp(-(4*(we*d+re*r+te*t)-2))),1e-9),1-1e-9);}
+        function recommendDiff(p){return p<K1?'low':p<K2?'mid':'high';}
+
+        window.showScreen=function(id){
+            ['screen-login','screen-signup','screen-home','screen-study','screen-test','screen-admin'].forEach(s=>document.getElementById(s).classList.add('hidden'));
+            document.getElementById(id).classList.remove('hidden');
+            document.getElementById('drawing-tools').classList.toggle('hidden',id!=='screen-study'&&id!=='screen-test');
+        };
+
+        window.handleLogin=async function(){
+            const id=document.getElementById('login-id').value.trim();
+            const pw=document.getElementById('login-pw').value;
+            if(id==='admin'&&pw==='seogwipo1234'){window.showScreen('screen-admin');window.renderAdminDashboard();return;}
+            try{const user=await window._fb.getUserByNickname(id);if(user&&user.pw===pw){window.APP_STATE.currentUser=user;window.renderHomeLayout();window.showScreen('screen-home');}else alert('로그인 실패');}catch(e){console.error(e);alert('로그인 중 오류');}
+        };
+        window.handleSignup=async function(){
+            const name=document.getElementById('reg-name').value.trim(),nick=document.getElementById('reg-nick').value.trim(),pw=document.getElementById('reg-pw').value,group=document.getElementById('reg-group').value;
+            if(!name||!nick||!pw)return alert('필수 입력');
+            try{if(await window._fb.getUserByNickname(nick))return alert('닉네임 중복');
+            await window._fb.createUser({name,nickname:nick,pw,group,testLogs:[],studyLogs:[],scores:{mid1:null,mid2:null,post:null},testDone:{mid1:false,mid2:false,post:false}});
+            alert('회원가입 완료!');window.showScreen('screen-login');}catch(e){console.error(e);alert('회원가입 오류');}
+        };
+        window.handleLogout=function(){location.reload();};
+
+        window.renderHomeLayout=function(){
+            const el=document.getElementById('home-buttons'),cu=window.APP_STATE.currentUser;
+            document.getElementById('user-display').innerText=cu.nickname;
+            document.getElementById('user-group-tag').innerText=`그룹: ${cu.group}`;
+            const mkBtn=(name,type)=>{
+                const done=cu.testDone?.[type]===true;
+                return done
+                    ?`<button disabled class="h-32 bg-gray-200 rounded-2xl shadow-md font-bold border-2 border-gray-300 text-gray-400 cursor-not-allowed flex flex-col items-center justify-center gap-1"><span>${name}</span><span class="text-xs font-normal bg-gray-300 text-gray-500 px-2 py-0.5 rounded-full">완료됨 ✓</span></button>`
+                    :`<button onclick="window.startTest('${name}','${type}')" class="h-32 bg-white rounded-2xl shadow-md font-bold border-2 border-gray-200 hover:bg-blue-50 hover:border-blue-300 transition flex items-center justify-center">${name}</button>`;
+            };
+            let html=mkBtn('중간 테스트 1','mid1')+mkBtn('중간 테스트 2','mid2')+mkBtn('사후 테스트','post');
+            const sc=(cu.studyLogs||[]).length;
+            if(cu.group==='Experimental'){
+                html+=sc>=6
+                    ?`<button disabled class="h-32 bg-gray-200 text-gray-400 rounded-2xl shadow-md font-bold border-2 border-gray-300 cursor-not-allowed col-span-2 flex flex-col items-center justify-center gap-1"><span>학습 완료</span><span class="text-xs font-normal">모든 학습을 완료했습니다</span></button>`
+                    :`<button onclick="window.startStudy()" class="h-32 bg-blue-600 text-white rounded-2xl shadow-lg font-bold col-span-2 hover:bg-blue-700 transition flex items-center justify-center">${sc+1}차 학습 시작</button>`;
+            }
+            el.innerHTML=html; el.className='home-grid-layout grid-cols-2';
+        };
+
+        window.startStudy=function(){
+            const s=window.APP_STATE;
+            s.currentStudyIdx=0;s.currentDiff='mid';s.usedStudyIds=new Set();
+            s.canvasStorage={};s.explCanvasStorage={};s.currentStudyLogs=[];
+            s.explCanvasSize={w:0,h:0};
+            window.showScreen('screen-study');window.renderStudy();
+        };
+
+        window.renderStudy=async function(){
+            const s=window.APP_STATE;
+            s.isGraded=false;s.isExplOpen=false;s.selectedStudyAns=null;
+            document.getElementById('expl-box').classList.add('hidden');
+            for(let i=1;i<=5;i++)document.getElementById(`study-ans-${i}`).className='ans-btn py-3 border-2 rounded-xl font-bold text-lg';
+            document.getElementById('btn-grade-study').disabled=false;document.getElementById('btn-grade-study').classList.remove('opacity-50');
+            document.getElementById('btn-toggle-expl').innerText='해설 보기';document.getElementById('btn-toggle-expl').disabled=true;document.getElementById('btn-toggle-expl').classList.add('opacity-50');
+            document.getElementById('btn-next-study').classList.add('hidden');document.getElementById('btn-finish-study').classList.add('hidden');
+            const pool=studyData.filter(d=>d.diff===s.currentDiff&&!s.usedStudyIds.has(d.id));
+            const fb=studyData.filter(d=>d.diff===s.currentDiff);
+            const q=pool.length>0?pool[Math.floor(Math.random()*pool.length)]:fb[Math.floor(Math.random()*fb.length)];
+            window.activeStudyQ=q;s.usedStudyIds.add(q.id);
+            document.getElementById('study-progress').innerText=`${s.currentStudyIdx+1} / 5`;
+            s.seconds=0;clearInterval(s.timerInterval);
+            s.timerInterval=setInterval(()=>{s.seconds++;document.getElementById('study-timer').innerText=`${String(Math.floor(s.seconds/60)).padStart(2,'0')}:${String(s.seconds%60).padStart(2,'0')}`;},1000);
+            const studyImg=document.getElementById('study-img');
+            const studyKey='study-'+s.currentStudyIdx;
+            const doInitStudy=()=>setTimeout(()=>window.initStudyCanvas(studyKey),50);
+            studyImg.onload=doInitStudy;studyImg.onerror=doInitStudy;
+            studyImg.src=q.img;
+            if(studyImg.complete&&studyImg.naturalWidth>0)doInitStudy();
+        };
+
+        window.initStudyCanvas=function(key){
+            const canvas=document.getElementById('study-canvas');
+            if(!canvas)return;
+            const parent=canvas.parentElement;
+            const w=parent.offsetWidth,h=parent.offsetHeight;
+            if(w===0||h===0)return;
+            canvas.width=w;canvas.height=h;
+            const ctx=canvas.getContext('2d');
+            ctx.clearRect(0,0,w,h);
+            const saved=window.APP_STATE.canvasStorage[key];
+            if(saved){const img=new Image();img.onload=()=>{ctx.drawImage(img,0,0);window.attachDrawing(canvas,key,'study');};img.src=saved;}
+            else window.attachDrawing(canvas,key,'study');
+        };
+
+        window.initExplCanvas=function(key){
+            const canvas=document.getElementById('expl-canvas');
+            if(!canvas)return;
+            const s=window.APP_STATE;
+            let w=canvas.parentElement.offsetWidth;
+            let h=canvas.parentElement.offsetHeight;
+            if(w===0||h===0){
+                const sc=document.getElementById('study-canvas');
+                w=sc?sc.width:300; h=sc?sc.height:400;
+            }
+            if(s.explCanvasSize.w>0) w=s.explCanvasSize.w;
+            if(s.explCanvasSize.h>0) h=s.explCanvasSize.h;
+            const saved=s.explCanvasStorage[key];
+            canvas.width=w;canvas.height=h;
+            s.explCanvasSize={w,h};
+            const ctx=canvas.getContext('2d');
+            ctx.clearRect(0,0,w,h);
+            if(saved){const img=new Image();img.onload=()=>{ctx.drawImage(img,0,0);window.attachDrawing(canvas,key,'expl');};img.src=saved;}
+            else window.attachDrawing(canvas,key,'expl');
+        };
+
+        window.attachDrawing=function(canvas,key,storageType){
+            const s=window.APP_STATE;
+            canvas.onpointerdown=null;canvas.onpointermove=null;canvas.onpointerup=null;
+            canvas.ontouchstart=null;canvas.ontouchmove=null;canvas.ontouchend=null;
+            let drawing=false,lx,ly;
+            const pos=e=>{const r=canvas.getBoundingClientRect(),t=e.touches?e.touches[0]:e;return{x:t.clientX-r.left,y:t.clientY-r.top};};
+            const start=e=>{drawing=true;const p=pos(e);lx=p.x;ly=p.y;};
+            const move=e=>{
+                if(!drawing)return;const p=pos(e);
+                const ctx=canvas.getContext('2d');
+                ctx.beginPath();ctx.moveTo(lx,ly);ctx.lineTo(p.x,p.y);
+                ctx.strokeStyle=s.currentTool==='eraser'?'#ffffff':'#1a1a1a';
+                ctx.lineWidth=s.currentTool==='eraser'?30:2;
+                ctx.globalCompositeOperation=s.currentTool==='eraser'?'destination-out':'source-over';
+                ctx.lineCap='round';ctx.stroke();
+                lx=p.x;ly=p.y;e.preventDefault();
+            };
+            const stop=()=>{
+                if(!drawing)return;drawing=false;
+                if(storageType==='expl') s.explCanvasStorage[key]=canvas.toDataURL();
+                else                     s.canvasStorage[key]=canvas.toDataURL();
+            };
+            canvas.onpointerdown=start;canvas.onpointermove=move;canvas.onpointerup=stop;
+            canvas.ontouchstart=start;canvas.ontouchmove=move;canvas.ontouchend=stop;
+        };
+
+        window.selectStudyAns=function(n){
+            const s=window.APP_STATE;if(s.isGraded)return;s.selectedStudyAns=n;
+            for(let i=1;i<=5;i++)document.getElementById(`study-ans-${i}`).className='ans-btn py-3 border-2 rounded-xl font-bold text-lg'+(i===n?' selected':'');
+        };
+
+        window.gradeStudy=async function(){
+            const s=window.APP_STATE;
+            if(s.selectedStudyAns===null)return alert('답안을 선택하세요!');
+            if(s.isGraded)return;
+            s.isGraded=true;clearInterval(s.timerInterval);
+            document.getElementById('btn-grade-study').disabled=true;document.getElementById('btn-grade-study').classList.add('opacity-50');
+            const q=window.activeStudyQ,ua=s.selectedStudyAns,ok=ua===q.correct,label=ok?1:0;
+            const d_val=D_MAP[s.currentDiff],r=Math.min(1,Math.max(0,1-s.seconds/120)),t_log=Math.log(Math.max(0.01,s.seconds)+1);
+            s.currentStudyLogs.push({problemId:q.id,correct:label,time:s.seconds,diff:s.currentDiff});
+            try{await window._fb.pushOnlineUpdate(d_val,r,t_log,label);}catch(e){}
+            let w={wd:0.5,wr:0.5,wt:0.5};try{w=await window._fb.getWeights()||w;}catch(e){}
+            s.currentDiff=recommendDiff(f_prob(d_val,r,t_log,w.wd,w.wr,w.wt));
+            for(let i=1;i<=5;i++){const b=document.getElementById(`study-ans-${i}`);if(i===q.correct)b.classList.add('correct');else if(i===ua)b.classList.add('wrong');else b.className='ans-btn py-3 border-2 rounded-xl font-bold text-lg';}
+            document.getElementById('btn-toggle-expl').disabled=false;document.getElementById('btn-toggle-expl').classList.remove('opacity-50');
+            if(s.currentStudyIdx<4)document.getElementById('btn-next-study').classList.remove('hidden');
+            else document.getElementById('btn-finish-study').classList.remove('hidden');
+            alert(ok?'정답! ✅':`오답 ❌  정답: ${q.correct}번`);
+        };
+
+        window.handleExplButtonClick=function(){
+            const s=window.APP_STATE;
+            const btn=document.getElementById('btn-toggle-expl');
+            const explBox=document.getElementById('expl-box');
+            const studyCanvas=document.getElementById('study-canvas');
+            const studyKey='study-'+s.currentStudyIdx;
+            const explKey='expl-'+s.currentStudyIdx;
+
+            if(!s.isExplOpen){
+                s.isExplOpen=true;
+                btn.innerText='해설 종료';
+                s.canvasStorage[studyKey]=studyCanvas.toDataURL();
+                studyCanvas.getContext('2d').clearRect(0,0,studyCanvas.width,studyCanvas.height);
+                explBox.classList.remove('hidden');
+                const explImg=document.getElementById('expl-img');
+                const doInit=()=>{requestAnimationFrame(()=>requestAnimationFrame(()=>window.initExplCanvas(explKey)));};
+                if(explImg.src===window.activeStudyQ.expl&&explImg.complete&&explImg.naturalWidth>0){doInit();}
+                else{explImg.onload=doInit;explImg.onerror=doInit;explImg.src=window.activeStudyQ.expl;}
+            }else{
+                s.isExplOpen=false;
+                btn.innerText='해설 보기';
+                const ec=document.getElementById('expl-canvas');
+                if(ec) s.explCanvasStorage[explKey]=ec.toDataURL();
+                explBox.classList.add('hidden');
+                const ctx=studyCanvas.getContext('2d');
+                ctx.clearRect(0,0,studyCanvas.width,studyCanvas.height);
+                const saved=s.canvasStorage[studyKey];
+                if(saved){const img=new Image();img.onload=()=>{ctx.drawImage(img,0,0);window.attachDrawing(studyCanvas,studyKey,'study');};img.src=saved;}
+                else window.attachDrawing(studyCanvas,studyKey,'study');
+            }
+        };
+
+        window.processAndNext=function(){
+            const s=window.APP_STATE;
+            const studyKey='study-'+s.currentStudyIdx,explKey='expl-'+s.currentStudyIdx;
+            const sc=document.getElementById('study-canvas');
+            if(sc)s.canvasStorage[studyKey]=sc.toDataURL();
+            if(s.isExplOpen){
+                const ec=document.getElementById('expl-canvas');
+                if(ec)s.explCanvasStorage[explKey]=ec.toDataURL();
+                document.getElementById('expl-box').classList.add('hidden');
+                s.isExplOpen=false;
+            }
+            s.currentStudyIdx++;window.renderStudy();
+        };
+
+        window.processAndFinish=async function(){
+            const s=window.APP_STATE;clearInterval(s.timerInterval);
+            try{const upd={...s.currentUser};if(!upd.studyLogs)upd.studyLogs=[];upd.studyLogs.push({date:new Date().toLocaleDateString('ko-KR'),logs:s.currentStudyLogs});await window._fb.updateUser(s.currentUser.nickname,upd);s.currentUser=upd;}catch(e){console.error(e);}
+            window.showScreen('screen-home');window.renderHomeLayout();
+        };
+
+        window.startTest=async function(title,type){
+            const s=window.APP_STATE;
+            if(s.currentUser.testDone?.[type]===true){alert('이미 완료한 테스트입니다.');return;}
+            s.currentTestType=type;s.currentPage=1;s.selectedAnswers={};s.canvasStorage={};s.testTimeLeft=1800;
+            clearInterval(s.timerInterval);
+            s.timerInterval=setInterval(()=>{s.testTimeLeft--;if(s.testTimeLeft<=0)window.finishTest();document.getElementById('test-timer-display').innerText=`${String(Math.floor(s.testTimeLeft/60)).padStart(2,'0')}:${String(s.testTimeLeft%60).padStart(2,'0')}`;},1000);
+            window.showScreen('screen-test');document.getElementById('test-title').innerText=title;window.renderTestPage();
+        };
+
+        window.renderTestPage=function(){
+            const s=window.APP_STATE,paper=document.getElementById('test-paper');
+            paper.innerHTML='';
+            const qs=TEST_QUESTIONS[s.currentTestType],st=(s.currentPage-1)*6,en=Math.min(st+6,qs.length);
+            for(let i=st;i<en;i++){
+                const q=qs[i];
+                const oh=q.options.map((o,idx)=>`<button onclick="window.pick(${i},${idx+1})" class="test-option-btn ${s.selectedAnswers[i]===idx+1?'selected':''}">${o}</button>`).join('');
+                paper.innerHTML+=`<div class="test-question"><div style="position:relative;"><canvas id="test-canvas-${i}" class="drawing-canvas"></canvas><div class="test-question-text" style="position:relative;z-index:10;white-space:pre-wrap;">${q.text}</div></div><div class="test-options">${oh}</div></div>`;
+            }
+            document.getElementById('test-page-indicator').innerText=`${s.currentPage} / 2`;
+            document.getElementById('btn-prev').classList.toggle('hidden',s.currentPage===1);
+            document.getElementById('btn-next').classList.toggle('hidden',s.currentPage===2);
+            document.getElementById('btn-finish-test').classList.toggle('hidden',s.currentPage===1);
+            setTimeout(()=>{for(let i=st;i<en;i++){const c=document.getElementById(`test-canvas-${i}`);if(c){const p=c.parentElement;c.width=p.offsetWidth;c.height=p.offsetHeight;const sv=s.canvasStorage[`test-${i}`];if(sv){const img=new Image();img.onload=()=>{c.getContext('2d').drawImage(img,0,0);window.attachDrawing(c,`test-${i}`,'test');}; img.src=sv;}else window.attachDrawing(c,`test-${i}`,'test');}}},100);
+            window.scrollTo(0,0);
+        };
+
+        window.changePage=function(dir){
+            const s=window.APP_STATE,st=(s.currentPage-1)*6,en=Math.min(st+6,TEST_QUESTIONS[s.currentTestType].length);
+            for(let i=st;i<en;i++){const c=document.getElementById(`test-canvas-${i}`);if(c)s.canvasStorage[`test-${i}`]=c.toDataURL();}
+            s.currentPage+=dir;window.renderTestPage();
+        };
+        window.pick=function(qi,an){
+            const s=window.APP_STATE;s.selectedAnswers[qi]=an;
+            const bs=document.querySelectorAll(`#test-paper .test-question:nth-child(${qi-(s.currentPage-1)*6+1}) .test-option-btn`);
+            bs.forEach((b,i)=>b.classList.toggle('selected',i+1===an));
+        };
+        window.finishTest=async function(){
+            const s=window.APP_STATE;clearInterval(s.timerInterval);
+            const qs=TEST_QUESTIONS[s.currentTestType];let sc=0;
+            for(let i=0;i<qs.length;i++)if(s.selectedAnswers[i]===qs[i].correct)sc+=qs[i].points;
+            const tot=Math.round(sc);
+            try{const upd={...s.currentUser};if(!upd.scores)upd.scores={};if(!upd.testDone)upd.testDone={};if(!upd.testLogs)upd.testLogs=[];upd.scores[s.currentTestType]=tot;upd.testDone[s.currentTestType]=true;upd.testLogs.push({type:s.currentTestType,score:tot,date:new Date().toLocaleString()});await window._fb.updateUser(s.currentUser.nickname,upd);s.currentUser=upd;}catch(e){console.error(e);}
+            alert(`테스트 완료!\n최종 점수: ${tot}점`);window.showScreen('screen-home');window.renderHomeLayout();
+        };
+
+        window.clearCurrentCanvas=function(){
+            const s=window.APP_STATE;
+            document.querySelectorAll('canvas').forEach(c=>{
+                if(c.closest('.hidden'))return;
+                c.getContext('2d').clearRect(0,0,c.width,c.height);
+                if(c.id==='study-canvas')s.canvasStorage['study-'+s.currentStudyIdx]=null;
+                else if(c.id==='expl-canvas')s.explCanvasStorage['expl-'+s.currentStudyIdx]=null;
+                else if(c.id.startsWith('test-canvas-'))s.canvasStorage[c.id.replace('test-canvas-','test-')]=null;
+            });
+        };
+        window.setTool=function(t){
+            const s=window.APP_STATE;s.currentTool=t;
+            document.getElementById('btn-pen').classList.toggle('tool-active',t==='pen');
+            document.getElementById('btn-eraser').classList.toggle('tool-active',t==='eraser');
+        };
+
+        window.renderAdminDashboard=async function(){
+            try{
+                const all=await window._fb.getAllUsers(),users=all.filter(u=>u.nickname!=='admin');
+                document.getElementById('admin-table-body').innerHTML=users.map(u=>`<tr class="border-b"><td class="p-2">${u.nickname}</td><td>${u.group}</td><td>${u.scores?.mid1??'-'}</td><td>${u.scores?.mid2??'-'}</td><td>${u.scores?.post??'-'}</td><td><button onclick="window.viewRealName('${u.name}')" class="bg-gray-200 px-2 rounded text-xs">확인</button></td></tr>`).join('');
+                const exp=users.filter(u=>u.group==='Experimental');
+                document.getElementById('study-table-body').innerHTML=exp.length===0?'<tr><td colspan="8" class="p-4 text-gray-400">실험군 학생 없음</td></tr>':exp.map(u=>{const l=u.studyLogs||[];return`<tr class="border-b"><td class="p-2 font-medium">${u.nickname}</td>${[1,2,3,4,5,6].map(n=>`<td><span class="done-badge ${l.length>=n?'bg-green-100 text-green-700':'bg-gray-100 text-gray-400'}">${l.length>=n?'✓':'-'}</span></td>`).join('')}<td class="font-bold text-blue-600">${l.length}</td></tr>`;}).join('');
+                const w=await window._fb.getWeights();
+                document.getElementById('weights-display').innerHTML=`<p>누적 학습 횟수: <strong>${w.n}</strong></p><p>wd: <strong>${Math.tanh(w.wd).toFixed(4)}</strong></p><p>wr: <strong>${Math.tanh(w.wr).toFixed(4)}</strong></p><p>wt: <strong>${Math.tanh(w.wt).toFixed(4)}</strong></p>`;
+            }catch(e){console.error(e);alert('데이터 로드 오류');}
+        };
+
+        window.viewRealName=function(n){document.getElementById('modal-real-name').innerText=n;document.getElementById('name-modal').classList.remove('hidden');};
+
+        window.resetAllUsers=async function(){
+            if(!confirm('⚠️ 전체 유저 데이터를 초기화하시겠습니까?\n\n모든 계정, 테스트 점수, 학습 기록이 삭제됩니다.\n이 작업은 되돌릴 수 없습니다.'))return;
+            if(!confirm('정말로 삭제하시겠습니까? 마지막 확인입니다.'))return;
+            try{await window._fb.deleteAllUsers();alert('✅ 전체 유저 데이터가 초기화되었습니다.');window.renderAdminDashboard();}
+            catch(e){console.error(e);alert('초기화 중 오류가 발생했습니다.');}
+        };
+        window.resetWeightsOnly=async function(){
+            if(!confirm('⚠️ 가중치 데이터를 초기화하시겠습니까?\n\n누적된 학습 가중치가 초기값으로 리셋됩니다.'))return;
+            try{await window._fb.resetWeights();alert('✅ 가중치가 초기화되었습니다. (wd=0.5, wr=0.5, wt=0.5, n=0)');window.renderAdminDashboard();}
+            catch(e){console.error(e);alert('초기화 중 오류가 발생했습니다.');}
+        };
+        window.resetAll=async function(){
+            if(!confirm('⚠️ 전체 데이터(유저 + 가중치)를 초기화하시겠습니까?\n\n모든 데이터가 삭제됩니다.\n이 작업은 되돌릴 수 없습니다.'))return;
+            if(!confirm('정말로 전체 초기화하시겠습니까? 마지막 확인입니다.'))return;
+            try{await window._fb.deleteAllUsers();await window._fb.resetWeights();alert('✅ 전체 데이터가 초기화되었습니다.');window.renderAdminDashboard();}
+            catch(e){console.error(e);alert('초기화 중 오류가 발생했습니다.');}
+        };
+
+        window.downloadStudyCSV=async function(){
+            try{const all=await window._fb.getAllUsers(),users=all.filter(u=>u.nickname!=='admin'&&u.group==='Experimental');let csv='닉네임,그룹,문제ID,n,정답여부,비율,시간(초),난이도\n';users.forEach(u=>{let pc=1,cc=0;(u.studyLogs||[]).forEach(sess=>{(sess.logs||[]).forEach(l=>{cc+=l.correct;csv+=`${u.nickname},${u.group},${l.problemId},${pc},${l.correct},${(cc/pc).toFixed(4)},${Math.log(1+l.time/60).toFixed(4)},${l.diff}\n`;pc++;});});});const b=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`sghs_study_${Date.now()}.csv`;document.body.appendChild(a);a.click();document.body.removeChild(a);alert('다운로드 완료');}catch(e){console.error(e);}
+        };
+        window.downloadTestCSV=async function(){
+            try{const all=await window._fb.getAllUsers(),users=all.filter(u=>u.nickname!=='admin');let csv='닉네임,그룹,테스트_유형,점수,날짜\n';users.forEach(u=>{(u.testLogs||[]).forEach(l=>{csv+=`${u.nickname},${u.group},${l.type},${l.score},"${l.date}"\n`;});});const b=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=`sghs_test_${Date.now()}.csv`;document.body.appendChild(a);a.click();document.body.removeChild(a);alert('다운로드 완료');}catch(e){console.error(e);}
+        };
+    </script>
+    <style>
+        *{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;}
+        .drawing-canvas{touch-action:none;position:absolute;top:0;left:0;z-index:20;background-color:transparent!important;}
+        .hidden{display:none;}
+        .canvas-container{position:relative;width:100%;background:white;border:1px solid #e5e7eb;border-radius:.75rem;overflow:hidden;margin-bottom:1.5rem;}
+        .tool-active{background-color:#1f2937!important;color:white!important;}
+        input[type="text"],input[type="password"],select{border:1px solid #d1d5db;padding:.5rem;border-radius:.4rem;width:100%;}
+        .home-grid-layout{display:grid;gap:1.5rem;}
+        .ans-btn{transition:all .2s;}
+        .ans-btn.selected{background-color:#2563eb!important;color:white!important;border-color:#2563eb!important;}
+        .ans-btn.correct{background-color:#10b981!important;color:white!important;border-color:#10b981!important;}
+        .ans-btn.wrong{background-color:#ef4444!important;color:white!important;border-color:#ef4444!important;}
+        .done-badge{display:inline-block;padding:2px 8px;border-radius:9999px;font-size:12px;font-weight:bold;}
+        .test-question{background:white;padding:1.5rem;border-radius:.75rem;border:1px solid #e5e7eb;margin-bottom:1.5rem;}
+        .test-question-text{font-size:.95rem;line-height:1.6;color:#333;padding:1rem;white-space:pre-wrap;}
+        .test-options{display:grid;grid-template-columns:1fr;gap:.75rem;margin-top:1rem;}
+        .test-option-btn{padding:.75rem;border:2px solid #d1d5db;border-radius:.5rem;background:white;cursor:pointer;font-weight:500;transition:all .2s;text-align:left;}
+        .test-option-btn:hover{border-color:#2563eb;background:#eff6ff;}
+        .test-option-btn.selected{background-color:#2563eb;color:white;border-color:#2563eb;}
+        button[disabled]{cursor:not-allowed!important;pointer-events:none!important;}
+    </style>
+</head>
+<body class="bg-gray-100 font-sans text-gray-900">
+<div id="drawing-tools" class="hidden fixed bottom-6 right-6 z-[100] flex flex-col space-y-3">
+    <div class="bg-white p-2 rounded-2xl shadow-2xl border flex flex-col space-y-2">
+        <button id="btn-pen" onclick="window.setTool('pen')" class="tool-active w-14 h-14 rounded-xl border flex items-center justify-center font-bold">펜</button>
+        <button id="btn-eraser" onclick="window.setTool('eraser')" class="bg-gray-100 w-14 h-14 rounded-xl border flex items-center justify-center font-bold">지우개</button>
+        <button onclick="window.clearCurrentCanvas()" class="bg-red-50 w-14 h-14 rounded-xl border flex items-center justify-center text-xs font-bold text-red-500">싹지우기</button>
+    </div>
+</div>
+<div id="main-wrapper">
+    <!-- 로그인 -->
+    <div id="screen-login" class="min-h-screen flex items-center justify-center p-6">
+        <div class="bg-white p-8 rounded-3xl shadow-xl w-full max-w-md">
+            <h1 class="text-2xl font-bold mb-6 text-center text-blue-600">SGHS 학습 시스템</h1>
+            <div class="space-y-4">
+                <input type="text" id="login-id" placeholder="닉네임">
+                <input type="password" id="login-pw" placeholder="비밀번호">
+                <button onclick="window.handleLogin()" class="w-full bg-blue-600 text-white py-3 rounded-xl font-bold">로그인</button>
+                <button onclick="window.showScreen('screen-signup')" class="w-full text-gray-500 text-sm">계정이 없으신가요? 회원가입</button>
+            </div>
+        </div>
+    </div>
+    <!-- 회원가입 -->
+    <div id="screen-signup" class="hidden min-h-screen flex items-center justify-center p-6">
+        <div class="bg-white p-8 rounded-3xl shadow-xl w-full max-w-md">
+            <h2 class="text-xl font-bold mb-6">회원가입</h2>
+            <div class="space-y-4">
+                <div><label class="text-xs font-bold text-gray-500">실명</label><input type="text" id="reg-name" placeholder="실명 입력"></div>
+                <div><label class="text-xs font-bold text-gray-500">닉네임</label><input type="text" id="reg-nick" placeholder="닉네임 입력"></div>
+                <div><label class="text-xs font-bold text-gray-500">비밀번호</label><input type="password" id="reg-pw" placeholder="비밀번호 입력"></div>
+                <div><label class="text-xs font-bold text-gray-500">그룹 선택</label><select id="reg-group"><option value="Experimental">실험군</option><option value="Control">대조군</option></select></div>
+                <button onclick="window.handleSignup()" class="w-full bg-green-600 text-white py-3 rounded-xl font-bold">가입하기</button>
+                <button onclick="window.showScreen('screen-login')" class="w-full text-gray-500 text-sm">뒤로 가기</button>
+            </div>
+        </div>
+    </div>
+    <!-- 홈 -->
+    <div id="screen-home" class="hidden p-8 max-w-5xl mx-auto">
+        <div class="flex justify-between items-center mb-10">
+            <div><span id="user-display" class="text-2xl font-bold text-blue-600">닉네임</span>님<p id="user-group-tag" class="text-sm text-gray-400">그룹</p></div>
+            <button onclick="window.handleLogout()" class="bg-gray-200 px-4 py-2 rounded-lg text-sm font-bold">로그아웃</button>
+        </div>
+        <div id="home-buttons" class="home-grid-layout grid-cols-2" style="gap:1.5rem;"></div>
+    </div>
+    <!-- 학습 -->
+    <div id="screen-study" class="hidden flex flex-col min-h-screen">
+        <header class="bg-white p-4 shadow-sm flex items-center justify-between sticky top-0 z-[60]">
+            <div class="flex items-center space-x-3 flex-wrap gap-y-2">
+                <span id="study-timer" class="text-2xl font-mono font-bold text-red-600 mr-2">00:00</span>
+                <button id="btn-grade-study" onclick="window.gradeStudy()" class="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold text-sm">채점</button>
+                <button id="btn-toggle-expl" onclick="window.handleExplButtonClick()" disabled class="bg-yellow-500 text-white px-4 py-2 rounded-lg font-bold text-sm opacity-50">해설 보기</button>
+                <button id="btn-next-study" onclick="window.processAndNext()" class="hidden bg-gray-800 text-white px-4 py-2 rounded-lg font-bold text-sm">다음 문제</button>
+                <button id="btn-finish-study" onclick="window.processAndFinish()" class="hidden bg-red-600 text-white px-4 py-2 rounded-lg font-bold text-sm">학습 종료</button>
+            </div>
+            <span id="study-progress" class="font-bold text-gray-500">1 / 5</span>
+        </header>
+        <main class="p-5 max-w-6xl mx-auto w-full">
+            <div class="grid grid-cols-1 gap-6">
+                <div class="flex flex-col md:flex-row gap-4">
+                    <div class="flex-1 canvas-container shadow-sm" style="margin-bottom:0;">
+                        <canvas id="study-canvas" class="drawing-canvas"></canvas>
+                        <img id="study-img" src="" alt="문제" class="w-full h-auto block">
+                    </div>
+                    <div id="expl-box" class="hidden flex-1 bg-blue-50 rounded-xl border border-blue-200 overflow-hidden shadow-sm">
+                        <div class="bg-blue-100 px-4 py-2 border-b border-blue-200"><h4 class="text-sm font-bold text-blue-600">해설</h4></div>
+                        <div class="canvas-container" style="margin-bottom:0;border:none;border-radius:0;">
+                            <canvas id="expl-canvas" class="drawing-canvas"></canvas>
+                            <img id="expl-img" src="" alt="해설" class="w-full h-auto block">
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-white p-6 rounded-2xl border shadow-sm relative z-30">
+                    <p class="text-sm font-bold text-gray-400 mb-4">답안 선택</p>
+                    <div class="grid grid-cols-5 gap-3">
+                        <button onclick="window.selectStudyAns(1)" id="study-ans-1" class="ans-btn py-3 border-2 rounded-xl font-bold text-lg">①</button>
+                        <button onclick="window.selectStudyAns(2)" id="study-ans-2" class="ans-btn py-3 border-2 rounded-xl font-bold text-lg">②</button>
+                        <button onclick="window.selectStudyAns(3)" id="study-ans-3" class="ans-btn py-3 border-2 rounded-xl font-bold text-lg">③</button>
+                        <button onclick="window.selectStudyAns(4)" id="study-ans-4" class="ans-btn py-3 border-2 rounded-xl font-bold text-lg">④</button>
+                        <button onclick="window.selectStudyAns(5)" id="study-ans-5" class="ans-btn py-3 border-2 rounded-xl font-bold text-lg">⑤</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <!-- 테스트 -->
+    <div id="screen-test" class="hidden flex flex-col min-h-screen pb-24">
+        <header class="bg-white p-4 shadow flex items-center justify-between sticky top-0 z-[60]">
+            <span id="test-timer-display" class="text-2xl font-mono font-bold text-red-600">30:00</span>
+            <h2 id="test-title" class="font-bold text-xl">테스트</h2>
+            <span id="test-page-indicator" class="font-bold text-blue-600">1 / 2</span>
+        </header>
+        <main id="test-paper" class="p-6 space-y-8 max-w-4xl mx-auto w-full"></main>
+        <div class="fixed bottom-0 left-0 w-full bg-white border-t p-5 flex justify-center space-x-4 z-[50]">
+            <button id="btn-prev" onclick="window.changePage(-1)" class="bg-gray-500 text-white px-10 py-3 rounded-xl font-bold hidden">이전</button>
+            <button id="btn-next" onclick="window.changePage(1)" class="bg-blue-600 text-white px-10 py-3 rounded-xl font-bold">다음 페이지</button>
+            <button id="btn-finish-test" onclick="window.finishTest()" class="bg-red-600 text-white px-10 py-3 rounded-xl font-bold hidden">최종 제출</button>
+        </div>
+    </div>
+    <!-- 어드민 -->
+    <div id="screen-admin" class="hidden p-8 max-w-6xl mx-auto">
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-3xl font-bold text-gray-800">Admin</h1>
+            <div class="flex flex-wrap gap-2 justify-end">
+                <button onclick="window.downloadStudyCSV()" class="bg-green-600 text-white px-4 py-2 rounded-lg font-bold">학습 데이터 CSV</button>
+                <button onclick="window.downloadTestCSV()"  class="bg-blue-600  text-white px-4 py-2 rounded-lg font-bold">테스트 데이터 CSV</button>
+                <button onclick="window.handleLogout()"     class="bg-gray-800  text-white px-4 py-2 rounded-lg font-bold">로그아웃</button>
+            </div>
+        </div>
+        <!-- 초기화 카드 -->
+        <div class="bg-red-50 border-2 border-red-200 rounded-2xl p-6 mb-6">
+            <h3 class="font-bold text-lg text-red-600 mb-1">⚠️ 데이터 초기화</h3>
+            <p class="text-sm text-red-400 mb-4">초기화 후 복구가 불가능합니다. 신중하게 사용하세요.</p>
+            <div class="flex flex-wrap gap-3">
+                <button onclick="window.resetAllUsers()"
+                    class="bg-red-500 hover:bg-red-600 text-white px-5 py-2 rounded-lg font-bold transition">
+                    👥 전체 유저 초기화
+                </button>
+                <button onclick="window.resetWeightsOnly()"
+                    class="bg-orange-400 hover:bg-orange-500 text-white px-5 py-2 rounded-lg font-bold transition">
+                    ⚖️ 가중치만 초기화
+                </button>
+                <button onclick="window.resetAll()"
+                    class="bg-red-700 hover:bg-red-800 text-white px-5 py-2 rounded-lg font-bold transition">
+                    🗑️ 전체 초기화 (유저 + 가중치)
+                </button>
+            </div>
+        </div>
+        <div class="bg-white p-6 rounded-2xl shadow-sm border overflow-x-auto mb-6">
+            <h3 class="font-bold text-lg mb-4">📝 테스트 점수</h3>
+            <table class="w-full text-sm text-center">
+                <thead class="bg-gray-50 font-bold border-b"><tr><th class="p-2">닉네임</th><th>그룹</th><th>중간1</th><th>중간2</th><th>사후</th><th>실명</th></tr></thead>
+                <tbody id="admin-table-body"></tbody>
+            </table>
+        </div>
+        <div class="bg-white p-6 rounded-2xl shadow-sm border overflow-x-auto mb-6">
+            <h3 class="font-bold text-lg mb-4">📚 학습 현황 (실험군)</h3>
+            <table class="w-full text-sm text-center">
+                <thead class="bg-gray-50 font-bold border-b"><tr><th class="p-2">닉네임</th><th>학습1</th><th>학습2</th><th>학습3</th><th>학습4</th><th>학습5</th><th>학습6</th><th>총 횟수</th></tr></thead>
+                <tbody id="study-table-body"></tbody>
+            </table>
+        </div>
+        <div class="bg-white p-6 rounded-2xl shadow-sm border mb-6">
+            <h3 class="font-bold text-lg mb-3">📊 공유 가중치 현황</h3>
+            <div id="weights-display" class="text-gray-600">로딩 중...</div>
+        </div>
+    </div>
+</div>
+<!-- 실명 모달 -->
+<div id="name-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-[200]">
+    <div class="bg-white p-8 rounded-3xl shadow-2xl text-center">
+        <h2 id="modal-real-name" class="text-3xl font-bold mb-6 text-blue-600">-</h2>
+        <button onclick="document.getElementById('name-modal').classList.add('hidden')" class="bg-gray-800 text-white px-8 py-2 rounded-xl">닫기</button>
+    </div>
+</div>
+</body>
+</html>
